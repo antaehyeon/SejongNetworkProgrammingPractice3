@@ -16,7 +16,6 @@
 #define MSGSIZE     (BUFSIZE-sizeof(int))  // 채팅 메시지 최대 길이
 
 #define CHATTING    1000                   // 메시지 타입: 채팅
-#define DRAWLINE    1001                   // 메시지 타입: 선 그리기
 
 #define WM_DRAWIT   (WM_USER+1)            // 사용자 정의 윈도우 메시지
 
@@ -36,19 +35,7 @@ struct CHAT_MSG
 	char buf[MSGSIZE];
 };
 
-// 선 그리기 메시지 형식
-// sizeof(DRAWLINE_MSG) == 256
-struct DRAWLINE_MSG
-{
-	int  type;
-	int  color;
-	int  x0, y0;
-	int  x1, y1;
-	char dummy[BUFSIZE-6*sizeof(int)];
-};
-
 static HINSTANCE     g_hInst; // 응용 프로그램 인스턴스 핸들
-static HWND          g_hDrawWnd; // 그림을 그릴 윈도우
 static HWND          g_hButtonSendMsg; // '메시지 전송' 버튼
 static HWND          g_hEditStatus; // 받은 메시지 출력
 static char          g_ipaddr[64]; // 서버 IP 주소
@@ -59,8 +46,7 @@ static volatile BOOL g_bStart; // 통신 시작 여부
 static SOCKET        g_sock; // 클라이언트 소켓
 static HANDLE        g_hReadEvent, g_hWriteEvent; // 이벤트 핸들
 static CHAT_MSG      g_chatmsg; // 채팅 메시지 저장
-static DRAWLINE_MSG  g_drawmsg; // 선 그리기 메시지 저장
-static int           g_drawcolor; // 선 그리기 색상
+
 
 // 대화상자 프로시저
 BOOL CALLBACK DlgProc(HWND, UINT, WPARAM, LPARAM);
@@ -68,8 +54,6 @@ BOOL CALLBACK DlgProc(HWND, UINT, WPARAM, LPARAM);
 DWORD WINAPI ClientMain(LPVOID arg);
 DWORD WINAPI ReadThread(LPVOID arg);
 DWORD WINAPI WriteThread(LPVOID arg);
-// 자식 윈도우 프로시저
-LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 // 편집 컨트롤 출력 함수
 void DisplayText(char *fmt, ...);
 // 사용자 정의 데이터 수신 함수
@@ -94,8 +78,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
 	// 변수 초기화(일부)
 	g_chatmsg.type = CHATTING;
-	g_drawmsg.type = DRAWLINE;
-	g_drawmsg.color = RGB(255, 0, 0);
 
 	// 대화상자 생성
 	g_hInst = hInstance;
@@ -113,42 +95,31 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 // 대화상자 프로시저
 BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-	static HWND hButtonIsIPv6;
 	static HWND hEditIPaddr;
 	static HWND hEditPort;
 	static HWND hButtonConnect;
 	static HWND hEditMsg;
-	static HWND hColorRed;
-	static HWND hColorGreen;
-	static HWND hColorBlue;
+	static HWND hEditNickName;
 
 	switch(uMsg){
 	case WM_INITDIALOG:
-		// 컨트롤 핸들 얻기
-		hButtonIsIPv6 = GetDlgItem(hDlg, IDC_ISIPV6);
-		hEditIPaddr = GetDlgItem(hDlg, IDC_IPADDR);
+		hEditIPaddr = GetDlgItem(hDlg, IDC_IPADDRESS);
 		hEditPort = GetDlgItem(hDlg, IDC_PORT);
+		hEditNickName = GetDlgItem(hDlg, IDC_NICKNAME);
 		hButtonConnect = GetDlgItem(hDlg, IDC_CONNECT);
 		g_hButtonSendMsg = GetDlgItem(hDlg, IDC_SENDMSG);
 		hEditMsg = GetDlgItem(hDlg, IDC_MSG);
 		g_hEditStatus = GetDlgItem(hDlg, IDC_STATUS);
-		hColorRed = GetDlgItem(hDlg, IDC_COLORRED);
-		hColorGreen = GetDlgItem(hDlg, IDC_COLORGREEN);
-		hColorBlue = GetDlgItem(hDlg, IDC_COLORBLUE);
 
 		// 컨트롤 초기화
 		SendMessage(hEditMsg, EM_SETLIMITTEXT, MSGSIZE, 0);
 		EnableWindow(g_hButtonSendMsg, FALSE);
-		SetDlgItemText(hDlg, IDC_IPADDR, SERVERIPV4);
+		SetDlgItemText(hDlg, IDC_IPADDRESS, SERVERIPV4);
 		SetDlgItemInt(hDlg, IDC_PORT, SERVERPORT, FALSE);
-		SendMessage(hColorRed, BM_SETCHECK, BST_CHECKED, 0);
-		SendMessage(hColorGreen, BM_SETCHECK, BST_UNCHECKED, 0);
-		SendMessage(hColorBlue, BM_SETCHECK, BST_UNCHECKED, 0);
 
 		// 윈도우 클래스 등록
 		WNDCLASS wndclass;
 		wndclass.style = CS_HREDRAW|CS_VREDRAW;
-		wndclass.lpfnWndProc = WndProc;
 		wndclass.cbClsExtra = 0;
 		wndclass.cbWndExtra = 0;
 		wndclass.hInstance = g_hInst;
@@ -159,29 +130,14 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		wndclass.lpszClassName = "MyWndClass";
 		if(!RegisterClass(&wndclass)) return 1;
 
-		// 자식 윈도우 생성
-		g_hDrawWnd = CreateWindow("MyWndClass", "그림 그릴 윈도우", WS_CHILD,
-			450, 38, 425, 415, hDlg, (HMENU)NULL, g_hInst, NULL);
-		if(g_hDrawWnd == NULL) return 1;
-		ShowWindow(g_hDrawWnd, SW_SHOW);
-		UpdateWindow(g_hDrawWnd);
-
 		return TRUE;
 
 	case WM_COMMAND:
 		switch(LOWORD(wParam)){
-		case IDC_ISIPV6:
-			g_isIPv6 = SendMessage(hButtonIsIPv6, BM_GETCHECK, 0, 0);
-			if(g_isIPv6 == false)
-				SetDlgItemText(hDlg, IDC_IPADDR, SERVERIPV4);
-			else
-				SetDlgItemText(hDlg, IDC_IPADDR, SERVERIPV6);
-			return TRUE;
 
 		case IDC_CONNECT:
 			GetDlgItemText(hDlg, IDC_IPADDR, g_ipaddr, sizeof(g_ipaddr));
 			g_port = GetDlgItemInt(hDlg, IDC_PORT, NULL, FALSE);
-			g_isIPv6 = SendMessage(hButtonIsIPv6, BM_GETCHECK, 0, 0);
 
 			// 소켓 통신 스레드 시작
 			g_hClientThread = CreateThread(NULL, 0, ClientMain, NULL, 0, NULL);
@@ -193,7 +149,6 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			else{
 				EnableWindow(hButtonConnect, FALSE);
 				while(g_bStart == FALSE); // 서버 접속 성공 기다림
-				EnableWindow(hButtonIsIPv6, FALSE);
 				EnableWindow(hEditIPaddr, FALSE);
 				EnableWindow(hEditPort, FALSE);
 				EnableWindow(g_hButtonSendMsg, TRUE);
@@ -209,18 +164,6 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			SetEvent(g_hWriteEvent);
 			// 입력된 텍스트 전체를 선택 표시
 			SendMessage(hEditMsg, EM_SETSEL, 0, -1);
-			return TRUE;
-
-		case IDC_COLORRED:
-			g_drawmsg.color = RGB(255, 0, 0);
-			return TRUE;
-
-		case IDC_COLORGREEN:
-			g_drawmsg.color = RGB(0, 255, 0);
-			return TRUE;
-
-		case IDC_COLORBLUE:
-			g_drawmsg.color = RGB(0, 0, 255);
 			return TRUE;
 
 		case IDCANCEL:
@@ -314,7 +257,6 @@ DWORD WINAPI ReadThread(LPVOID arg)
 	int retval;
 	COMM_MSG comm_msg;
 	CHAT_MSG *chat_msg;
-	DRAWLINE_MSG *draw_msg;
 
 	while(1){
 		retval = recvn(g_sock, (char *)&comm_msg, BUFSIZE, 0);
@@ -325,14 +267,6 @@ DWORD WINAPI ReadThread(LPVOID arg)
 		if(comm_msg.type == CHATTING){
 			chat_msg = (CHAT_MSG *)&comm_msg;
 			DisplayText("[받은 메시지] %s\r\n", chat_msg->buf);
-		}
-
-		else if(comm_msg.type == DRAWLINE){
-			draw_msg = (DRAWLINE_MSG *)&comm_msg;
-			g_drawcolor = draw_msg->color;
-			SendMessage(g_hDrawWnd, WM_DRAWIT,
-				MAKEWPARAM(draw_msg->x0, draw_msg->y0),
-				MAKELPARAM(draw_msg->x1, draw_msg->y1));
 		}
 	}
 
@@ -371,103 +305,6 @@ DWORD WINAPI WriteThread(LPVOID arg)
 	}
 
 	return 0;
-}
-
-// 자식 윈도우 프로시저
-LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
-{
-	HDC hDC;
-	int cx, cy;
-	PAINTSTRUCT ps;
-	RECT rect;
-	HPEN hPen, hOldPen;
-	static HBITMAP hBitmap;
-	static HDC hDCMem;
-	static int x0, y0;
-	static int x1, y1;
-	static BOOL bDrawing = FALSE;
-
-	switch(uMsg){
-	case WM_CREATE:
-		hDC = GetDC(hWnd);
-
-		// 화면을 저장할 비트맵 생성
-		cx = GetDeviceCaps(hDC, HORZRES);
-		cy = GetDeviceCaps(hDC, VERTRES);
-		hBitmap = CreateCompatibleBitmap(hDC, cx, cy);
-
-		// 메모리 DC 생성
-		hDCMem = CreateCompatibleDC(hDC);
-
-		// 비트맵 선택 후 메모리 DC 화면을 흰색으로 칠함
-		SelectObject(hDCMem, hBitmap);
-		SelectObject(hDCMem, GetStockObject(WHITE_BRUSH));
-		SelectObject(hDCMem, GetStockObject(WHITE_PEN));
-		Rectangle(hDCMem, 0, 0, cx, cy);
-
-		ReleaseDC(hWnd, hDC);
-		return 0;
-	case WM_LBUTTONDOWN:
-		x0 = LOWORD(lParam);
-		y0 = HIWORD(lParam);
-		bDrawing = TRUE;
-		return 0;
-	case WM_MOUSEMOVE:
-		if(bDrawing && g_bStart){
-			x1 = LOWORD(lParam);
-			y1 = HIWORD(lParam);
-
-			// 선 그리기 메시지 보내기
-			g_drawmsg.x0 = x0;
-			g_drawmsg.y0 = y0;
-			g_drawmsg.x1 = x1;
-			g_drawmsg.y1 = y1;
-			send(g_sock, (char *)&g_drawmsg, BUFSIZE, 0);
-
-			x0 = x1;
-			y0 = y1;
-		}
-		return 0;
-	case WM_LBUTTONUP:
-		bDrawing = FALSE;
-		return 0;
-	case WM_DRAWIT:
-		hDC = GetDC(hWnd);
-		hPen = CreatePen(PS_SOLID, 3, g_drawcolor);
-
-		// 화면에 그리기
-		hOldPen = (HPEN)SelectObject(hDC, hPen);
-		MoveToEx(hDC, LOWORD(wParam), HIWORD(wParam), NULL);
-		LineTo(hDC, LOWORD(lParam), HIWORD(lParam));
-		SelectObject(hDC, hOldPen);
-
-		// 메모리 비트맵에 그리기
-		hOldPen = (HPEN)SelectObject(hDCMem, hPen);
-		MoveToEx(hDCMem, LOWORD(wParam), HIWORD(wParam), NULL);
-		LineTo(hDCMem, LOWORD(lParam), HIWORD(lParam));
-		SelectObject(hDC, hOldPen);
-
-		DeleteObject(hPen);
-		ReleaseDC(hWnd, hDC);
-		return 0;
-	case WM_PAINT:
-		hDC = BeginPaint(hWnd, &ps);
-
-		// 메모리 비트맵에 저장된 그림을 화면에 전송
-		GetClientRect(hWnd, &rect);
-		BitBlt(hDC, 0, 0, rect.right - rect.left,
-			rect.bottom - rect.top, hDCMem, 0, 0, SRCCOPY);
-
-		EndPaint(hWnd, &ps);
-		return 0;
-	case WM_DESTROY:
-		DeleteObject(hBitmap);
-		DeleteDC(hDCMem);
-		PostQuitMessage(0);
-		return 0;
-	}
-
-	return DefWindowProc(hWnd, uMsg, wParam, lParam);
 }
 
 // 에디트 컨트롤에 문자열 출력
