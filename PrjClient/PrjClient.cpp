@@ -53,7 +53,7 @@ static SOCKET        g_sock; // 클라이언트 소켓
 static HANDLE        g_hReadEvent, g_hWriteEvent; // 이벤트 핸들
 static CHAT_MSG      g_chatmsg; // 채팅 메시지 저장
 
-static int			 g_isChating; // 채팅방 
+static int			 g_isChating; // 채팅방 모드
 
 
 // 대화상자 프로시저
@@ -109,16 +109,21 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	static HWND hButtonConnect;
 	static HWND hEditMsg;
 	static HWND hEditNickName;
+	static HWND hSecondEditNickName;
 
 	// 채팅방 접속하는 버튼 생성
 	static HWND btnFirstChatConnect;
 	static HWND btnSecondChatConnect;
+
+	// 닉네임 변경하는 버튼
+	static HWND btnNickNameChange;
 
 	switch(uMsg){
 	case WM_INITDIALOG:
 		hEditIPaddr = GetDlgItem(hDlg, IDC_IPADDRESS);
 		hEditPort = GetDlgItem(hDlg, IDC_PORT);
 		hEditNickName = GetDlgItem(hDlg, IDC_NICKNAME);
+		hSecondEditNickName = GetDlgItem(hDlg, IDC_NICKNAME2);
 		hButtonConnect = GetDlgItem(hDlg, IDC_CONNECT);
 
 		g_hButtonSendMsg = GetDlgItem(hDlg, IDC_SENDMSG);
@@ -131,11 +136,16 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		btnFirstChatConnect = GetDlgItem(hDlg, IDC_CHAT1);
 		btnSecondChatConnect = GetDlgItem(hDlg, IDC_CHAT2);
 
+		// 닉네임 변경하는 버튼
+		btnNickNameChange = GetDlgItem(hDlg, IDC_NICKNAMECHANGEBTN);
+
 		// 컨트롤 초기화
 		SendMessage(hEditMsg, EM_SETLIMITTEXT, MSGSIZE, 0);
 		EnableWindow(g_hButtonSendMsg, FALSE);
 		EnableWindow(btnFirstChatConnect, FALSE);
 		EnableWindow(btnSecondChatConnect, FALSE);
+		EnableWindow(btnNickNameChange, FALSE);
+		ShowWindow(g_hSecondEditStatus, FALSE);
 		SetDlgItemText(hDlg, IDC_IPADDRESS, SERVERIPV4);
 		SetDlgItemInt(hDlg, IDC_PORT, SERVERPORT, FALSE);
 
@@ -187,20 +197,26 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			}
 			return TRUE;
 
+		// 첫번째 채팅방 입장버튼을 클릭할 경우
 		case IDC_CHAT1:
 			ShowWindow(g_hSecondEditStatus, FALSE);
 			ShowWindow(g_hEditStatus, TRUE);
 			EnableWindow(btnFirstChatConnect, FALSE);
 			EnableWindow(btnSecondChatConnect, TRUE);
+			ShowWindow(hEditNickName, TRUE);
+			ShowWindow(hSecondEditNickName, FALSE);
 			g_chatmsg.chatMode = FIRST_CHAT;
 			g_isChating = FIRST_CHAT;
 			return TRUE;
 
+		// 첫번째 채팅방 입장버튼을 클릭할 경우
 		case IDC_CHAT2:
 			ShowWindow(g_hEditStatus, FALSE);
 			ShowWindow(g_hSecondEditStatus, TRUE);
 			EnableWindow(btnFirstChatConnect, TRUE);
 			EnableWindow(btnSecondChatConnect, FALSE);
+			ShowWindow(hEditNickName, FALSE);
+			ShowWindow(hSecondEditNickName, TRUE);
 			g_chatmsg.chatMode = SECOND_CHAT;
 			g_isChating = SECOND_CHAT;
 			return TRUE;
@@ -208,7 +224,12 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		case IDC_SENDMSG:
 			// 읽기 완료를 기다림
 			WaitForSingleObject(g_hReadEvent, INFINITE);
-			GetDlgItemText(hDlg, IDC_NICKNAME, g_chatmsg.nickName, MSGSIZE);
+			if (g_isChating == FIRST_CHAT) {
+				GetDlgItemText(hDlg, IDC_NICKNAME, g_chatmsg.nickName, MSGSIZE);
+			}
+			else {
+				GetDlgItemText(hDlg, IDC_NICKNAME2, g_chatmsg.nickName, MSGSIZE);
+			}
 			GetDlgItemText(hDlg, IDC_MSG, g_chatmsg.buf, MSGSIZE);
 			// 쓰기 완료를 알림
 			SetEvent(g_hWriteEvent);
@@ -317,14 +338,7 @@ DWORD WINAPI ReadThread(LPVOID arg)
 
 		if(comm_msg.type == CHATTING){
 			chat_msg = (CHAT_MSG *)&comm_msg;
-			if (chat_msg->chatMode == FIRST_CHAT) {
-				g_isChating = FIRST_CHAT;
-			}
-			else {
-				g_isChating = SECOND_CHAT;
-			}
-
-			DisplayText(g_isChating, "[%s] : %s \r\n", chat_msg->nickName, chat_msg->buf);
+			DisplayText(chat_msg->chatMode, "[%s] : %s \r\n", chat_msg->nickName, chat_msg->buf);
 		}
 	}
 
