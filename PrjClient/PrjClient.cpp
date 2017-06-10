@@ -53,6 +53,8 @@ static SOCKET        g_sock; // 클라이언트 소켓
 static HANDLE        g_hReadEvent, g_hWriteEvent; // 이벤트 핸들
 static CHAT_MSG      g_chatmsg; // 채팅 메시지 저장
 
+static int			 g_isChating; // 채팅방 
+
 
 // 대화상자 프로시저
 BOOL CALLBACK DlgProc(HWND, UINT, WPARAM, LPARAM);
@@ -61,7 +63,7 @@ DWORD WINAPI ClientMain(LPVOID arg);
 DWORD WINAPI ReadThread(LPVOID arg);
 DWORD WINAPI WriteThread(LPVOID arg);
 // 편집 컨트롤 출력 함수
-void DisplayText(char *fmt, ...);
+void DisplayText(int chatingMode, char *fmt, ...);
 // 사용자 정의 데이터 수신 함수
 int recvn(SOCKET s, char *buf, int len, int flags);
 // 오류 출력 함수
@@ -181,15 +183,26 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 				EnableWindow(btnFirstChatConnect, FALSE);
 				EnableWindow(btnSecondChatConnect, TRUE);
 				SetFocus(hEditMsg);
+				g_isChating = FIRST_CHAT;
 			}
 			return TRUE;
 
 		case IDC_CHAT1:
 			ShowWindow(g_hSecondEditStatus, FALSE);
+			ShowWindow(g_hEditStatus, TRUE);
+			EnableWindow(btnFirstChatConnect, FALSE);
+			EnableWindow(btnSecondChatConnect, TRUE);
+			g_chatmsg.chatMode = FIRST_CHAT;
+			g_isChating = FIRST_CHAT;
 			return TRUE;
 
 		case IDC_CHAT2:
 			ShowWindow(g_hEditStatus, FALSE);
+			ShowWindow(g_hSecondEditStatus, TRUE);
+			EnableWindow(btnFirstChatConnect, TRUE);
+			EnableWindow(btnSecondChatConnect, FALSE);
+			g_chatmsg.chatMode = SECOND_CHAT;
+			g_isChating = SECOND_CHAT;
 			return TRUE;
 
 		case IDC_SENDMSG:
@@ -304,7 +317,14 @@ DWORD WINAPI ReadThread(LPVOID arg)
 
 		if(comm_msg.type == CHATTING){
 			chat_msg = (CHAT_MSG *)&comm_msg;
-			DisplayText("[%s] : %s \r\n", chat_msg->nickName, chat_msg->buf);
+			if (chat_msg->chatMode == FIRST_CHAT) {
+				g_isChating = FIRST_CHAT;
+			}
+			else {
+				g_isChating = SECOND_CHAT;
+			}
+
+			DisplayText(g_isChating, "[%s] : %s \r\n", chat_msg->nickName, chat_msg->buf);
 		}
 	}
 
@@ -339,10 +359,6 @@ DWORD WINAPI WriteThread(LPVOID arg)
 		//}
 
 		// 데이터 보내기
-
-
-
-
 		retval = send(g_sock, (char *)&g_chatmsg, BUFSIZE, 0);
 		if(retval == SOCKET_ERROR){
 			break;
@@ -358,7 +374,7 @@ DWORD WINAPI WriteThread(LPVOID arg)
 }
 
 // 에디트 컨트롤에 문자열 출력
-void DisplayText(char *fmt, ...)
+void DisplayText(int chatingMode, char *fmt, ...)
 {
 	va_list arg;
 	va_start(arg, fmt);
@@ -366,10 +382,20 @@ void DisplayText(char *fmt, ...)
 	char cbuf[1024];
 	vsprintf(cbuf, fmt, arg);
 
-	int nLength = GetWindowTextLength(g_hEditStatus);
-	SendMessage(g_hEditStatus, EM_SETSEL, nLength, nLength);
-	SendMessage(g_hEditStatus, EM_REPLACESEL, FALSE, (LPARAM)cbuf);
-
+	switch (chatingMode)
+	{
+		int nLength;
+	case FIRST_CHAT:
+		nLength = GetWindowTextLength(g_hEditStatus);
+		SendMessage(g_hEditStatus, EM_SETSEL, nLength, nLength);
+		SendMessage(g_hEditStatus, EM_REPLACESEL, FALSE, (LPARAM)cbuf);
+		break;
+	case SECOND_CHAT:
+		nLength = GetWindowTextLength(g_hSecondEditStatus);
+		SendMessage(g_hSecondEditStatus, EM_SETSEL, nLength, nLength);
+		SendMessage(g_hSecondEditStatus, EM_REPLACESEL, FALSE, (LPARAM)cbuf);
+		break;
+	}
 	va_end(arg);
 }
 
