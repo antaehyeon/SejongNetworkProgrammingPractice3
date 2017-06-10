@@ -13,6 +13,7 @@ struct SOCKETINFO
 {
 	SOCKET sock;
 	bool   isIPv6;
+	char   nickName[BUFSIZE];
 	char   buf[BUFSIZE];
 	int    recvbytes;
 };
@@ -136,6 +137,7 @@ int main(int argc, char *argv[])
 
 		// 소켓 셋 검사(2): 데이터 통신
 		for(i=0; i<nTotalSockets; i++){
+
 			SOCKETINFO *ptr = SocketInfoArray[i];
 			if(FD_ISSET(ptr->sock, &rset)){
 				// 데이터 받기
@@ -157,6 +159,7 @@ int main(int argc, char *argv[])
 					for(j=0; j<nTotalSockets; j++){
 						SOCKETINFO *ptr2 = SocketInfoArray[j];
 						retval = send(ptr2->sock, ptr->buf, BUFSIZE, 0);
+						retval = send(ptr2->sock, ptr->nickName, BUFSIZE, 0);
 						if(retval == SOCKET_ERROR){
 							err_display("send()");
 							RemoveSocketInfo(j);

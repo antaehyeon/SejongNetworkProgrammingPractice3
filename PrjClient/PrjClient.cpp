@@ -19,6 +19,9 @@
 
 #define WM_DRAWIT   (WM_USER+1)            // 사용자 정의 윈도우 메시지
 
+#define FIRST_CHAT 1					   // 채팅방 : 1번째
+#define SECOND_CHAT 2					   // 채팅방 : 2번째
+
 // 공통 메시지 형식
 // sizeof(COMM_MSG) == 256
 struct COMM_MSG
@@ -32,6 +35,9 @@ struct COMM_MSG
 struct CHAT_MSG
 {
 	int  type;
+	int  chatMode;
+	char nickname[MSGSIZE];
+
 	char buf[MSGSIZE];
 };
 
@@ -78,6 +84,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
 	// 변수 초기화(일부)
 	g_chatmsg.type = CHATTING;
+	g_chatmsg.chatMode = FIRST_CHAT;
 
 	// 대화상자 생성
 	g_hInst = hInstance;
@@ -101,15 +108,25 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	static HWND hEditMsg;
 	static HWND hEditNickName;
 
+	// 채팅방 접속하는 버튼 생성
+	static HWND btnFirstChatConnect;
+	static HWND btnSecondChatConnect;
+
 	switch(uMsg){
 	case WM_INITDIALOG:
 		hEditIPaddr = GetDlgItem(hDlg, IDC_IPADDRESS);
 		hEditPort = GetDlgItem(hDlg, IDC_PORT);
 		hEditNickName = GetDlgItem(hDlg, IDC_NICKNAME);
 		hButtonConnect = GetDlgItem(hDlg, IDC_CONNECT);
+
 		g_hButtonSendMsg = GetDlgItem(hDlg, IDC_SENDMSG);
-		hEditMsg = GetDlgItem(hDlg, IDC_MSG);
 		g_hEditStatus = GetDlgItem(hDlg, IDC_STATUS);
+
+		hEditMsg = GetDlgItem(hDlg, IDC_MSG);
+
+		// 채팅방 접속하는 버튼 초기화
+		btnFirstChatConnect = GetDlgItem(hDlg, IDC_CHAT1);
+		btnSecondChatConnect = GetDlgItem(hDlg, IDC_CHAT2);
 
 		// 컨트롤 초기화
 		SendMessage(hEditMsg, EM_SETLIMITTEXT, MSGSIZE, 0);
@@ -136,7 +153,7 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		switch(LOWORD(wParam)){
 
 		case IDC_CONNECT:
-			GetDlgItemText(hDlg, IDC_IPADDR, g_ipaddr, sizeof(g_ipaddr));
+			GetDlgItemText(hDlg, IDC_IPADDRESS, g_ipaddr, sizeof(g_ipaddr));
 			g_port = GetDlgItemInt(hDlg, IDC_PORT, NULL, FALSE);
 
 			// 소켓 통신 스레드 시작
@@ -152,6 +169,7 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 				EnableWindow(hEditIPaddr, FALSE);
 				EnableWindow(hEditPort, FALSE);
 				EnableWindow(g_hButtonSendMsg, TRUE);
+				EnableWindow(btnFirstChatConnect, FALSE);
 				SetFocus(hEditMsg);
 			}
 			return TRUE;
@@ -159,6 +177,7 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		case IDC_SENDMSG:
 			// 읽기 완료를 기다림
 			WaitForSingleObject(g_hReadEvent, INFINITE);
+			GetDlgItemText(hDlg, IDC_NICKNAME, g_chatmsg.nickname, MSGSIZE);
 			GetDlgItemText(hDlg, IDC_MSG, g_chatmsg.buf, MSGSIZE);
 			// 쓰기 완료를 알림
 			SetEvent(g_hWriteEvent);
@@ -218,6 +237,7 @@ DWORD WINAPI ClientMain(LPVOID arg)
 		if(retval == SOCKET_ERROR) err_quit("connect()");
 	}
 	MessageBox(NULL, "서버에 접속했습니다.", "성공!", MB_ICONINFORMATION);
+	MessageBox(NULL, "첫번째 채팅방으로 접속합니다", "성공!", MB_ICONINFORMATION);
 
 	// 읽기 & 쓰기 스레드 생성
 	HANDLE hThread[2];
@@ -266,7 +286,7 @@ DWORD WINAPI ReadThread(LPVOID arg)
 
 		if(comm_msg.type == CHATTING){
 			chat_msg = (CHAT_MSG *)&comm_msg;
-			DisplayText("[받은 메시지] %s\r\n", chat_msg->buf);
+			DisplayText("[%s] %s\r\n", chat_msg->nickname, chat_msg->buf);
 		}
 	}
 
@@ -287,12 +307,24 @@ DWORD WINAPI WriteThread(LPVOID arg)
 		if(strlen(g_chatmsg.buf) == 0){
 			// '메시지 전송' 버튼 활성화
 			EnableWindow(g_hButtonSendMsg, TRUE);
+			MessageBox(NULL, "메세지가 아무것도 입력되지 않았습니다", "알림", MB_ICONINFORMATION);
 			// 읽기 완료 알리기
 			SetEvent(g_hReadEvent);
 			continue;
 		}
 
+		// 닉네임 길이가 0이면 보내지 않음
+		if (strlen(g_chatmsg.nickname) == 0) {
+			MessageBox(NULL, "닉네임을 입력해주시기 바랍니다", "알림", MB_ICONINFORMATION);
+			SetEvent(g_hReadEvent);
+			continue;
+		}
+
 		// 데이터 보내기
+
+
+
+
 		retval = send(g_sock, (char *)&g_chatmsg, BUFSIZE, 0);
 		if(retval == SOCKET_ERROR){
 			break;
