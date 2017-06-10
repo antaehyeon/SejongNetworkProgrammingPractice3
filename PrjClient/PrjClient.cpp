@@ -36,14 +36,14 @@ struct CHAT_MSG
 {
 	int  type;
 	int  chatMode;
-	char nickname[MSGSIZE];
-
-	char buf[MSGSIZE];
+	char buf[124];
+	char nickName[124];
 };
 
 static HINSTANCE     g_hInst; // 응용 프로그램 인스턴스 핸들
 static HWND          g_hButtonSendMsg; // '메시지 전송' 버튼
 static HWND          g_hEditStatus; // 받은 메시지 출력
+static HWND			 g_hSecondEditStatus; // 받은 메세지 출력 두번째 창
 static char          g_ipaddr[64]; // 서버 IP 주소
 static u_short       g_port; // 서버 포트 번호
 static BOOL          g_isIPv6; // IPv4 or IPv6 주소?
@@ -121,6 +121,7 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 		g_hButtonSendMsg = GetDlgItem(hDlg, IDC_SENDMSG);
 		g_hEditStatus = GetDlgItem(hDlg, IDC_STATUS);
+		g_hSecondEditStatus = GetDlgItem(hDlg, IDC_SECONDCHATINGROOM);
 
 		hEditMsg = GetDlgItem(hDlg, IDC_MSG);
 
@@ -131,6 +132,8 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		// 컨트롤 초기화
 		SendMessage(hEditMsg, EM_SETLIMITTEXT, MSGSIZE, 0);
 		EnableWindow(g_hButtonSendMsg, FALSE);
+		EnableWindow(btnFirstChatConnect, FALSE);
+		EnableWindow(btnSecondChatConnect, FALSE);
 		SetDlgItemText(hDlg, IDC_IPADDRESS, SERVERIPV4);
 		SetDlgItemInt(hDlg, IDC_PORT, SERVERPORT, FALSE);
 
@@ -156,6 +159,12 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			GetDlgItemText(hDlg, IDC_IPADDRESS, g_ipaddr, sizeof(g_ipaddr));
 			g_port = GetDlgItemInt(hDlg, IDC_PORT, NULL, FALSE);
 
+			// 포트번호 예외처리
+			if (g_port < 1024 || g_port > 49151) {
+				MessageBox(NULL, "PORT를 제대로 입력하세요", "경고", MB_OK);
+				break;
+			}
+
 			// 소켓 통신 스레드 시작
 			g_hClientThread = CreateThread(NULL, 0, ClientMain, NULL, 0, NULL);
 			if(g_hClientThread == NULL){
@@ -170,14 +179,23 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 				EnableWindow(hEditPort, FALSE);
 				EnableWindow(g_hButtonSendMsg, TRUE);
 				EnableWindow(btnFirstChatConnect, FALSE);
+				EnableWindow(btnSecondChatConnect, TRUE);
 				SetFocus(hEditMsg);
 			}
+			return TRUE;
+
+		case IDC_CHAT1:
+			ShowWindow(g_hSecondEditStatus, FALSE);
+			return TRUE;
+
+		case IDC_CHAT2:
+			ShowWindow(g_hEditStatus, FALSE);
 			return TRUE;
 
 		case IDC_SENDMSG:
 			// 읽기 완료를 기다림
 			WaitForSingleObject(g_hReadEvent, INFINITE);
-			GetDlgItemText(hDlg, IDC_NICKNAME, g_chatmsg.nickname, MSGSIZE);
+			GetDlgItemText(hDlg, IDC_NICKNAME, g_chatmsg.nickName, MSGSIZE);
 			GetDlgItemText(hDlg, IDC_MSG, g_chatmsg.buf, MSGSIZE);
 			// 쓰기 완료를 알림
 			SetEvent(g_hWriteEvent);
@@ -286,7 +304,7 @@ DWORD WINAPI ReadThread(LPVOID arg)
 
 		if(comm_msg.type == CHATTING){
 			chat_msg = (CHAT_MSG *)&comm_msg;
-			DisplayText("[%s] %s\r\n", chat_msg->nickname, chat_msg->buf);
+			DisplayText("[%s] : %s \r\n", chat_msg->nickName, chat_msg->buf);
 		}
 	}
 
@@ -313,12 +331,12 @@ DWORD WINAPI WriteThread(LPVOID arg)
 			continue;
 		}
 
-		// 닉네임 길이가 0이면 보내지 않음
-		if (strlen(g_chatmsg.nickname) == 0) {
-			MessageBox(NULL, "닉네임을 입력해주시기 바랍니다", "알림", MB_ICONINFORMATION);
-			SetEvent(g_hReadEvent);
-			continue;
-		}
+		//// 닉네임 길이가 0이면 보내지 않음
+		//if (strlen(g_chatmsg.nickname) == 0) {
+		//	MessageBox(NULL, "닉네임을 입력해주시기 바랍니다", "알림", MB_ICONINFORMATION);
+		//	SetEvent(g_hReadEvent);
+		//	continue;
+		//}
 
 		// 데이터 보내기
 
