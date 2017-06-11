@@ -15,7 +15,8 @@
 #define BUFSIZE     256                    // 전송 메시지 전체 크기
 #define MSGSIZE     (BUFSIZE-sizeof(int))  // 채팅 메시지 최대 길이
 
-#define CHATTING    1000                   // 메시지 타입: 채팅
+#define CHATTING    1000                   // 메시지 타입 : 채팅
+#define NICKNAMECHANGE 2000				   // 메세지 타입 : 닉네임 변경
 
 #define WM_DRAWIT   (WM_USER+1)            // 사용자 정의 윈도우 메시지
 
@@ -55,6 +56,12 @@ static HANDLE        g_hReadEvent, g_hWriteEvent; // 이벤트 핸들
 static CHAT_MSG      g_chatmsg; // 채팅 메시지 저장
 
 static int			 g_isChating; // 채팅방 모드
+
+char * firstChatingUser[256] = { '\0', };
+char * secondChatingUser[256] = { '\0', };
+
+int firstUserCount = 0;
+int secondUserCount = 0;
 
 
 // 대화상자 프로시저
@@ -172,7 +179,6 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		case IDC_CONNECT:
 			GetDlgItemText(hDlg, IDC_IPADDRESS, g_ipaddr, sizeof(g_ipaddr));
 			GetDlgItemText(hDlg, IDC_NICKNAME, g_chatmsg.nickName, MSGSIZE);
-			strcpy(g_chatmsg.buf, "NICKNAME CHANGE F");
 			g_port = GetDlgItemInt(hDlg, IDC_PORT, NULL, FALSE);
 
 
@@ -186,6 +192,9 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 				MessageBox(NULL, "닉네임이 비어있습니다!\n닉네임을 입력해주세요!", "경고", MB_OK);
 				break;
 			}
+
+			// 닉네임과 g_chatmsg 의 type 을 변경
+			g_chatmsg.type = 2000;
 
 
 			// 소켓 통신 스레드 시작
@@ -207,8 +216,6 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 				g_isChating = FIRST_CHAT;
 				EnableWindow(btnNickNameChange, TRUE);
 				EnableWindow(hEditNickName, FALSE);
-
-
 
 				int retval = send(g_sock, (char *)&g_chatmsg, BUFSIZE, 0);
 				SetEvent(g_hReadEvent);
@@ -357,6 +364,10 @@ DWORD WINAPI ReadThread(LPVOID arg)
 		if(comm_msg.type == CHATTING){
 			chat_msg = (CHAT_MSG *)&comm_msg;
 			DisplayText(chat_msg->chatMode, "[%s] : %s \r\n", chat_msg->nickName, chat_msg->buf);
+		}
+		if (comm_msg.type == NICKNAMECHANGE) {
+			chat_msg = (CHAT_MSG *)&comm_msg;
+			firstChatingUser[firstUserCount] = chat_msg->nickName;
 		}
 	}
 
