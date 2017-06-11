@@ -18,6 +18,7 @@
 #define CHATTING    1000                   // 메시지 타입 : 채팅
 #define NICKNAMECHANGE 2000				   // 메세지 타입 : 닉네임 변경
 #define REQUESTNICKNAME 3000
+#define REQUESTSECONDNICKNAME 3100
 #define RECEIVENICKNAME 3001
 
 #define WM_DRAWIT   (WM_USER+1)            // 사용자 정의 윈도우 메시지
@@ -59,7 +60,8 @@ static CHAT_MSG      g_chatmsg; // 채팅 메시지 저장
 
 static int			 g_isChatting; // 채팅방 모드
 
-static char*		 nickName[2] = { '\0', };
+static char			 firstNickName[256] = { '\0', };
+static char			 secondNickName[256] = { '\0', };
 static bool			 showNickName = false;
 static bool			 sendNickName = false;
 
@@ -192,7 +194,7 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			GetDlgItemText(hDlg, IDC_NICKNAME, g_chatmsg.nickName, MSGSIZE);
 			g_port = GetDlgItemInt(hDlg, IDC_PORT, NULL, FALSE);
 
-			nickName[0] = g_chatmsg.nickName;
+			strcpy(firstNickName, g_chatmsg.nickName);
 
 			// 포트번호 예외처리
 			if (g_port < 1024 || g_port > 49151) {
@@ -267,7 +269,7 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 					break;
 				}
 				else {
-					nickName[1] = g_chatmsg.nickName;
+					strcpy(secondNickName, g_chatmsg.nickName);
 					EnableWindow(hSecondEditNickName, FALSE);
 				}
 			}
@@ -287,20 +289,26 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 			send(g_sock, (char *)&g_chatmsg, BUFSIZE, 0);
 			DisplayText(g_isChatting, "[첫번째 채팅방 유저를 출력합니다]\r\n");
-			DisplayText(g_isChatting, "%s(나)\r\n", nickName[0]);
+			DisplayText(g_isChatting, "%s(나)\r\n", firstNickName);
 			SetEvent(g_hReadEvent);
 
 			return TRUE;
 
+		// 두번째 채팅방 유저출력 버튼
 		case IDC_SHOWSECOND:
 			sendNickName = false;
 			showNickName = true;
 
-			g_chatmsg.type = REQUESTNICKNAME;
+			g_chatmsg.type = REQUESTSECONDNICKNAME;
 
 			send(g_sock, (char *)&g_chatmsg, BUFSIZE, 0);
 			DisplayText(g_isChatting, "[두번째 채팅방 유저를 출력합니다]\r\n");
-			DisplayText(g_isChatting, "%s(나)\r\n", nickName[1]);
+			if (secondNickName == NULL) {
+				DisplayText(g_isChatting, "닉네임 미설정(나)\r\n");
+			}
+			else {
+				DisplayText(g_isChatting, "%s(나)\r\n", secondNickName);
+			}
 			SetEvent(g_hReadEvent);
 
 			return TRUE;
@@ -311,7 +319,7 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			case FIRST_CHAT:
 				if (isNickNameChange) {
 					GetDlgItemText(hDlg, IDC_NICKNAME, g_chatmsg.nickName, MSGSIZE);
-					nickName[0] = g_chatmsg.nickName;
+					strcpy(firstNickName, g_chatmsg.nickName);
 					isNickNameChange = false;
 					MessageBox(NULL, "첫번째 대화방 닉네임 변경에 성공하였습니다 :)", "성공!", MB_ICONINFORMATION);
 					EnableWindow(hEditNickName, FALSE);
@@ -324,7 +332,7 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			case SECOND_CHAT:
 				if (isNickNameChange) {
 					GetDlgItemText(hDlg, IDC_NICKNAME2, g_chatmsg.nickName, MSGSIZE);
-					nickName[1] = g_chatmsg.nickName;
+					strcpy(secondNickName, g_chatmsg.nickName);
 					isNickNameChange = false;
 					MessageBox(NULL, "두번째 대화방 닉네임 변경에 성공하였습니다 :)", "성공!", MB_ICONINFORMATION);
 					EnableWindow(hSecondEditNickName, FALSE);
@@ -446,7 +454,21 @@ DWORD WINAPI ReadThread(LPVOID arg)
 			if (!showNickName) {
 				g_chatmsg.type = RECEIVENICKNAME;
 				sendNickName = true;
-				strcpy(g_chatmsg.nickName, nickName[0]);
+				strcpy(g_chatmsg.nickName, firstNickName);
+				send(g_sock, (char *)&g_chatmsg, BUFSIZE, 0);
+			}
+		}
+		else if (comm_msg.type == REQUESTSECONDNICKNAME) {
+			if (!showNickName) {
+				g_chatmsg.type = RECEIVENICKNAME;
+				sendNickName = true;
+				
+				if (secondNickName == NULL) {
+					strcpy(g_chatmsg.nickName, "[System]닉네임 미설정");
+				}
+				else {
+					strcpy(g_chatmsg.nickName, secondNickName);
+				}
 				send(g_sock, (char *)&g_chatmsg, BUFSIZE, 0);
 			}
 		}
@@ -455,7 +477,7 @@ DWORD WINAPI ReadThread(LPVOID arg)
 			if (!sendNickName) {
 				showNickName = false;
 				chat_msg = (CHAT_MSG *)&comm_msg;
-				DisplayText(chat_msg->chatMode, "%s\r\n", chat_msg->nickName);
+				DisplayText(g_isChatting, "%s\r\n", chat_msg->nickName);
 			}
 		}
 	}
