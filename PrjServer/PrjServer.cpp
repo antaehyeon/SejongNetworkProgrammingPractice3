@@ -21,6 +21,12 @@ struct SOCKETINFO
 int nTotalSockets = 0;
 SOCKETINFO *SocketInfoArray[FD_SETSIZE];
 
+char * firstChatingUser[256] = { '\0', };
+char * secondChatingUser[256] = { '\0', };
+
+int firstChatUserCount = 0;
+int secondChatUserCount = 0;
+
 // 소켓 관리 함수
 BOOL AddSocketInfo(SOCKET sock, bool isIPv6);
 void RemoveSocketInfo(int nIndex);
@@ -155,9 +161,25 @@ int main(int argc, char *argv[])
 					// 받은 바이트 수 리셋
 					ptr->recvbytes = 0;
 
+					// 첫번째 채팅방에서 닉네임 변경이 이뤄졌을 경우
+					if (ptr->buf[8] == 'N' && ptr->buf[12] == 'N'
+						&& ptr->buf[20] == 'N' && ptr->buf[24] == 'F') {
+						//strcpy(firstChatingUser[firstChatUserCount], ptr->nickName);
+						firstChatUserCount++;
+						continue;
+					}
+
+					printf(ptr->buf);
+					printf("\n\n\n");
+					printf(ptr->nickName);
+
 					// 현재 접속한 모든 클라이언트에게 데이터를 보냄!
 					for(j=0; j<nTotalSockets; j++){
 						SOCKETINFO *ptr2 = SocketInfoArray[j];
+
+						printf("%s\n", ptr->buf);
+						printf("%s\n\n", ptr->nickName);
+
 						retval = send(ptr2->sock, ptr->buf, BUFSIZE, 0);
 						retval = send(ptr2->sock, ptr->nickName, BUFSIZE, 0);
 						if(retval == SOCKET_ERROR){

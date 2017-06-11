@@ -45,6 +45,7 @@ static HWND          g_hButtonSendMsg; // '메시지 전송' 버튼
 static HWND          g_hEditStatus; // 받은 메시지 출력
 static HWND			 g_hSecondEditStatus; // 받은 메세지 출력 두번째 창
 static char          g_ipaddr[64]; // 서버 IP 주소
+static char			 g_nickNameFirstConnection[124];
 static u_short       g_port; // 서버 포트 번호
 static BOOL          g_isIPv6; // IPv4 or IPv6 주소?
 static HANDLE        g_hClientThread; // 스레드 핸들
@@ -146,6 +147,7 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		EnableWindow(btnSecondChatConnect, FALSE);
 		EnableWindow(btnNickNameChange, FALSE);
 		ShowWindow(g_hSecondEditStatus, FALSE);
+		ShowWindow(hSecondEditNickName, FALSE);
 		SetDlgItemText(hDlg, IDC_IPADDRESS, SERVERIPV4);
 		SetDlgItemInt(hDlg, IDC_PORT, SERVERPORT, FALSE);
 
@@ -169,13 +171,22 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 		case IDC_CONNECT:
 			GetDlgItemText(hDlg, IDC_IPADDRESS, g_ipaddr, sizeof(g_ipaddr));
+			GetDlgItemText(hDlg, IDC_NICKNAME, g_chatmsg.nickName, MSGSIZE);
+			strcpy(g_chatmsg.buf, "NICKNAME CHANGE F");
 			g_port = GetDlgItemInt(hDlg, IDC_PORT, NULL, FALSE);
+
 
 			// 포트번호 예외처리
 			if (g_port < 1024 || g_port > 49151) {
 				MessageBox(NULL, "PORT를 제대로 입력하세요", "경고", MB_OK);
 				break;
 			}
+
+			if (g_chatmsg.nickName[0] == '\0') {
+				MessageBox(NULL, "닉네임이 비어있습니다!\n닉네임을 입력해주세요!", "경고", MB_OK);
+				break;
+			}
+
 
 			// 소켓 통신 스레드 시작
 			g_hClientThread = CreateThread(NULL, 0, ClientMain, NULL, 0, NULL);
@@ -194,6 +205,13 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 				EnableWindow(btnSecondChatConnect, TRUE);
 				SetFocus(hEditMsg);
 				g_isChating = FIRST_CHAT;
+				EnableWindow(btnNickNameChange, TRUE);
+				EnableWindow(hEditNickName, FALSE);
+
+
+
+				int retval = send(g_sock, (char *)&g_chatmsg, BUFSIZE, 0);
+				SetEvent(g_hReadEvent);
 			}
 			return TRUE;
 
