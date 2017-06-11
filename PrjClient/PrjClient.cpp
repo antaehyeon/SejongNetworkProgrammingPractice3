@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "resource.h"
+#include "windows.h"
 
 #define SERVERIPV4  "127.0.0.1"
 #define SERVERIPV6  "::1"
@@ -15,8 +16,11 @@
 #define BUFSIZE     256                    // 전송 메시지 전체 크기
 #define MSGSIZE     (BUFSIZE-sizeof(int))  // 채팅 메시지 최대 길이
 
+#define INIT 100
 #define CHATTING    1000                   // 메시지 타입 : 채팅
 #define NICKNAMECHANGE 2000				   // 메세지 타입 : 닉네임 변경
+#define SAMENICKNAME 2001
+#define NICKNAMECHECK 2002
 #define REQUESTNICKNAME 3000
 #define REQUESTSECONDNICKNAME 3100
 #define RECEIVENICKNAME 3001
@@ -55,17 +59,20 @@ static BOOL          g_isIPv6; // IPv4 or IPv6 주소?
 static HANDLE        g_hClientThread; // 스레드 핸들
 static volatile BOOL g_bStart; // 통신 시작 여부
 static SOCKET        g_sock; // 클라이언트 소켓
-static HANDLE        g_hReadEvent, g_hWriteEvent; // 이벤트 핸들
+static HANDLE        g_hReadEvent, g_hWriteEvent, g_nickNameEvent; // 이벤트 핸들
 static CHAT_MSG      g_chatmsg; // 채팅 메시지 저장
 
 static int			 g_isChatting; // 채팅방 모드
 
 static char			 firstNickName[256] = { '\0', };
 static char			 secondNickName[256] = { '\0', };
+static char			 tempNickName[256] = { '\0', };
 static bool			 showNickName = false;
 static bool			 sendNickName = false;
 
 static bool			 isNickNameChange = false;
+static bool			 isDuplicationNickName = false;
+static bool			 isPassNickName = true;
 
 
 // 대화상자 프로시저
@@ -95,6 +102,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 	if(g_hReadEvent == NULL) return 1;
 	g_hWriteEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
 	if(g_hWriteEvent == NULL) return 1;
+	g_nickNameEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
+	if (g_nickNameEvent == NULL) return 1;
 
 	// 변수 초기화(일부)
 	g_chatmsg.type = CHATTING;
@@ -107,6 +116,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 	// 이벤트 제거
 	CloseHandle(g_hReadEvent);
 	CloseHandle(g_hWriteEvent);
+	CloseHandle(g_nickNameEvent);
 
 	// 윈속 종료
 	WSACleanup();
@@ -228,10 +238,14 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 				g_isChatting = FIRST_CHAT;
 				EnableWindow(btnNickNameChange, TRUE);
 				EnableWindow(hEditNickName, FALSE);
+
+				g_chatmsg.type = INIT;
+				send(g_sock, (char *)&g_chatmsg, BUFSIZE, 0);
 			}
 			return TRUE;
 
 		// 첫번째 채팅방 입장버튼을 클릭할 경우
+
 		case IDC_CHAT1:
 			ShowWindow(g_hSecondEditStatus, FALSE);
 			ShowWindow(g_hEditStatus, TRUE);
@@ -318,11 +332,48 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			switch (g_isChatting) {
 			case FIRST_CHAT:
 				if (isNickNameChange) {
+
 					GetDlgItemText(hDlg, IDC_NICKNAME, g_chatmsg.nickName, MSGSIZE);
-					strcpy(firstNickName, g_chatmsg.nickName);
+					strcpy(tempNickName, g_chatmsg.nickName);
+					g_chatmsg.type = NICKNAMECHANGE;
+					send(g_sock, (char *)&g_chatmsg, BUFSIZE, 0);
+
+					Sleep(1000);
+
+					// 중복이 됬을경우
+					if (isDuplicationNickName) {
+						MessageBox(NULL, "닉네임이 중복됩니다.", "경고", MB_OK);
+						isDuplicationNickName = false;
+					}
+					else {
+						EnableWindow(hEditNickName, FALSE);
+						isNickNameChange = false;
+						isPassNickName = true;
+						isDuplicationNickName = false;
+
+						MessageBox(NULL, "닉네임이 정상적으로 변경되었습니다.", "성공", MB_OK);
+						switch (g_isChatting)
+						{
+						case FIRST_CHAT:
+							strcpy(firstNickName, tempNickName);
+							isPassNickName = false;
+							break;
+						case SECOND_CHAT:
+							strcpy(secondNickName, tempNickName);
+							isPassNickName = false;
+							break;
+						}
+					}
+
+					//MessageBox(NULL, "isPassNickName 조건문에 성립하였습니다", "성공!", MB_ICONINFORMATION);
+					
+						
+					/*GetDlgItemText(hDlg, IDC_NICKNAME, g_chatmsg.nickName, MSGSIZE);
+					strcpy(firstNickName, g_chatmsg.nickName);c
 					isNickNameChange = false;
 					MessageBox(NULL, "첫번째 대화방 닉네임 변경에 성공하였습니다 :)", "성공!", MB_ICONINFORMATION);
 					EnableWindow(hEditNickName, FALSE);
+					break;*/
 					break;
 				}
 				EnableWindow(hEditNickName, TRUE);
@@ -449,6 +500,36 @@ DWORD WINAPI ReadThread(LPVOID arg)
 			chat_msg = (CHAT_MSG *)&comm_msg;
 			DisplayText(chat_msg->chatMode, "[%s] : %s \r\n", chat_msg->nickName, chat_msg->buf);
 		}
+		else if (comm_msg.type == NICKNAMECHANGE) {
+			chat_msg = (CHAT_MSG *)&comm_msg;
+			if (!strcmp(chat_msg->nickName, firstNickName) || !strcmp(chat_msg->nickName, secondNickName)) {
+				g_chatmsg.type = SAMENICKNAME;
+				send(g_sock, (char *)&g_chatmsg, BUFSIZE, 0);
+			}
+		}
+		else if (comm_msg.type == SAMENICKNAME && isNickNameChange) {
+			isDuplicationNickName = true;
+		}
+		//else if (comm_msg.type == NICKNAMECHECK && isNickNameChange) {
+		//	//MessageBox(NULL, "닉네임 체크부분에 진입하였습니다.", "알림", MB_OK);
+		//	if (isDuplicationNickName) {
+		//		MessageBox(NULL, "닉네임이 중복됩니다.", "경고", MB_OK);
+		//	}
+		//	else {
+		//		MessageBox(NULL, "닉네임이 정상적으로 변경되었습니다.", "성공", MB_OK);
+		//		switch (g_isChatting)
+		//		{
+		//		case FIRST_CHAT:
+		//			strcpy(firstNickName, tempNickName);
+		//			isPassNickName = false;
+		//			break;
+		//		case SECOND_CHAT:
+		//			strcpy(secondNickName, tempNickName);
+		//			isPassNickName = false;
+		//			break;
+		//		}
+		//	}
+		//}
 		// 여긴 요청당한 클라이언트들이 받는곳
 		else if (comm_msg.type == REQUESTNICKNAME) {
 			if (!showNickName) {
