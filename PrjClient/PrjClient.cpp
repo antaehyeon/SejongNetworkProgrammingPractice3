@@ -57,11 +57,13 @@ static SOCKET        g_sock; // 클라이언트 소켓
 static HANDLE        g_hReadEvent, g_hWriteEvent; // 이벤트 핸들
 static CHAT_MSG      g_chatmsg; // 채팅 메시지 저장
 
-static int			 g_isChating; // 채팅방 모드
+static int			 g_isChatting; // 채팅방 모드
 
-static char*		 nickName[2];
+static char*		 nickName[2] = { '\0', };
 static bool			 showNickName = false;
 static bool			 sendNickName = false;
+
+static bool			 isNickNameChange = false;
 
 
 // 대화상자 프로시저
@@ -221,7 +223,7 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 				EnableWindow(btnShowFirstRoom, TRUE);
 				EnableWindow(btnShowSecondRoom, TRUE);
 				SetFocus(hEditMsg);
-				g_isChating = FIRST_CHAT;
+				g_isChatting = FIRST_CHAT;
 				EnableWindow(btnNickNameChange, TRUE);
 				EnableWindow(hEditNickName, FALSE);
 			}
@@ -236,7 +238,7 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			ShowWindow(hEditNickName, TRUE);
 			ShowWindow(hSecondEditNickName, FALSE);
 			g_chatmsg.chatMode = FIRST_CHAT;
-			g_isChating = FIRST_CHAT;
+			g_isChatting = FIRST_CHAT;
 			return TRUE;
 
 		// 첫번째 채팅방 입장버튼을 클릭할 경우
@@ -248,18 +250,26 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			ShowWindow(hEditNickName, FALSE);
 			ShowWindow(hSecondEditNickName, TRUE);
 			g_chatmsg.chatMode = SECOND_CHAT;
-			g_isChating = SECOND_CHAT;
+			g_isChatting = SECOND_CHAT;
 			return TRUE;
 
 		case IDC_SENDMSG:
 			// 읽기 완료를 기다림
 			WaitForSingleObject(g_hReadEvent, INFINITE);
 			g_chatmsg.type = CHATTING;
-			if (g_isChating == FIRST_CHAT) {
+			if (g_isChatting == FIRST_CHAT) {
 				GetDlgItemText(hDlg, IDC_NICKNAME, g_chatmsg.nickName, MSGSIZE);
 			}
 			else {
 				GetDlgItemText(hDlg, IDC_NICKNAME2, g_chatmsg.nickName, MSGSIZE);
+				if (g_chatmsg.nickName[0] == '\0') {
+					MessageBox(hDlg, "두번째 채팅방의 닉네임을 입력해주세요", "실패!", MB_ICONERROR);
+					break;
+				}
+				else {
+					nickName[1] = g_chatmsg.nickName;
+					EnableWindow(hSecondEditNickName, FALSE);
+				}
 			}
 			GetDlgItemText(hDlg, IDC_MSG, g_chatmsg.buf, MSGSIZE);
 			// 쓰기 완료를 알림
@@ -271,14 +281,60 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		// 첫번째 채팅방 유저출력 버튼
 		case IDC_SHOWFIRST:
 			sendNickName = false;
-
 			showNickName = true;
+
 			g_chatmsg.type = REQUESTNICKNAME;
 
 			send(g_sock, (char *)&g_chatmsg, BUFSIZE, 0);
-			DisplayText(g_isChating, "[첫번째 채팅방 유저를 출력합니다]\r\n");
-			DisplayText(g_isChating, "%s(나)\r\n", nickName[0]);
+			DisplayText(g_isChatting, "[첫번째 채팅방 유저를 출력합니다]\r\n");
+			DisplayText(g_isChatting, "%s(나)\r\n", nickName[0]);
 			SetEvent(g_hReadEvent);
+
+			return TRUE;
+
+		case IDC_SHOWSECOND:
+			sendNickName = false;
+			showNickName = true;
+
+			g_chatmsg.type = REQUESTNICKNAME;
+
+			send(g_sock, (char *)&g_chatmsg, BUFSIZE, 0);
+			DisplayText(g_isChatting, "[두번째 채팅방 유저를 출력합니다]\r\n");
+			DisplayText(g_isChatting, "%s(나)\r\n", nickName[1]);
+			SetEvent(g_hReadEvent);
+
+			return TRUE;
+
+		// 닉네임 변경버튼
+		case IDC_NICKNAMECHANGEBTN:
+			switch (g_isChatting) {
+			case FIRST_CHAT:
+				if (isNickNameChange) {
+					GetDlgItemText(hDlg, IDC_NICKNAME, g_chatmsg.nickName, MSGSIZE);
+					nickName[0] = g_chatmsg.nickName;
+					isNickNameChange = false;
+					MessageBox(NULL, "첫번째 대화방 닉네임 변경에 성공하였습니다 :)", "성공!", MB_ICONINFORMATION);
+					EnableWindow(hEditNickName, FALSE);
+					break;
+				}
+				EnableWindow(hEditNickName, TRUE);
+				isNickNameChange = true;
+				break;
+
+			case SECOND_CHAT:
+				if (isNickNameChange) {
+					GetDlgItemText(hDlg, IDC_NICKNAME2, g_chatmsg.nickName, MSGSIZE);
+					nickName[1] = g_chatmsg.nickName;
+					isNickNameChange = false;
+					MessageBox(NULL, "두번째 대화방 닉네임 변경에 성공하였습니다 :)", "성공!", MB_ICONINFORMATION);
+					EnableWindow(hSecondEditNickName, FALSE);
+					break;
+				}
+				EnableWindow(hSecondEditNickName, TRUE);
+				isNickNameChange = true;
+
+				break;
+			}
 
 			return TRUE;
 
