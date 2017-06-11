@@ -17,6 +17,8 @@
 
 #define CHATTING    1000                   // 메시지 타입 : 채팅
 #define NICKNAMECHANGE 2000				   // 메세지 타입 : 닉네임 변경
+#define REQUESTNICKNAME 3000
+#define RECEIVENICKNAME 3001
 
 #define WM_DRAWIT   (WM_USER+1)            // 사용자 정의 윈도우 메시지
 
@@ -57,11 +59,9 @@ static CHAT_MSG      g_chatmsg; // 채팅 메시지 저장
 
 static int			 g_isChating; // 채팅방 모드
 
-char * firstChatingUser[256] = { '\0', };
-char * secondChatingUser[256] = { '\0', };
-
-int firstUserCount = 0;
-int secondUserCount = 0;
+static char*		 nickName[2];
+static bool			 showNickName = false;
+static bool			 sendNickName = false;
 
 
 // 대화상자 프로시저
@@ -126,6 +126,10 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	// 닉네임 변경하는 버튼
 	static HWND btnNickNameChange;
 
+	static HWND btnShowFirstRoom;
+	static HWND btnShowSecondRoom;
+
+
 	switch(uMsg){
 	case WM_INITDIALOG:
 		hEditIPaddr = GetDlgItem(hDlg, IDC_IPADDRESS);
@@ -147,6 +151,9 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		// 닉네임 변경하는 버튼
 		btnNickNameChange = GetDlgItem(hDlg, IDC_NICKNAMECHANGEBTN);
 
+		btnShowFirstRoom = GetDlgItem(hDlg, IDC_SHOWFIRST);
+		btnShowSecondRoom = GetDlgItem(hDlg, IDC_SHOWSECOND);
+
 		// 컨트롤 초기화
 		SendMessage(hEditMsg, EM_SETLIMITTEXT, MSGSIZE, 0);
 		EnableWindow(g_hButtonSendMsg, FALSE);
@@ -155,6 +162,8 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		EnableWindow(btnNickNameChange, FALSE);
 		ShowWindow(g_hSecondEditStatus, FALSE);
 		ShowWindow(hSecondEditNickName, FALSE);
+		EnableWindow(btnShowFirstRoom, FALSE);
+		EnableWindow(btnShowSecondRoom, FALSE);
 		SetDlgItemText(hDlg, IDC_IPADDRESS, SERVERIPV4);
 		SetDlgItemInt(hDlg, IDC_PORT, SERVERPORT, FALSE);
 
@@ -181,6 +190,7 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			GetDlgItemText(hDlg, IDC_NICKNAME, g_chatmsg.nickName, MSGSIZE);
 			g_port = GetDlgItemInt(hDlg, IDC_PORT, NULL, FALSE);
 
+			nickName[0] = g_chatmsg.nickName;
 
 			// 포트번호 예외처리
 			if (g_port < 1024 || g_port > 49151) {
@@ -192,10 +202,6 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 				MessageBox(NULL, "닉네임이 비어있습니다!\n닉네임을 입력해주세요!", "경고", MB_OK);
 				break;
 			}
-
-			// 닉네임과 g_chatmsg 의 type 을 변경
-			g_chatmsg.type = 2000;
-
 
 			// 소켓 통신 스레드 시작
 			g_hClientThread = CreateThread(NULL, 0, ClientMain, NULL, 0, NULL);
@@ -212,13 +218,12 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 				EnableWindow(g_hButtonSendMsg, TRUE);
 				EnableWindow(btnFirstChatConnect, FALSE);
 				EnableWindow(btnSecondChatConnect, TRUE);
+				EnableWindow(btnShowFirstRoom, TRUE);
+				EnableWindow(btnShowSecondRoom, TRUE);
 				SetFocus(hEditMsg);
 				g_isChating = FIRST_CHAT;
 				EnableWindow(btnNickNameChange, TRUE);
 				EnableWindow(hEditNickName, FALSE);
-
-				int retval = send(g_sock, (char *)&g_chatmsg, BUFSIZE, 0);
-				SetEvent(g_hReadEvent);
 			}
 			return TRUE;
 
@@ -249,6 +254,7 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		case IDC_SENDMSG:
 			// 읽기 완료를 기다림
 			WaitForSingleObject(g_hReadEvent, INFINITE);
+			g_chatmsg.type = CHATTING;
 			if (g_isChating == FIRST_CHAT) {
 				GetDlgItemText(hDlg, IDC_NICKNAME, g_chatmsg.nickName, MSGSIZE);
 			}
@@ -260,6 +266,20 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			SetEvent(g_hWriteEvent);
 			// 입력된 텍스트 전체를 선택 표시
 			SendMessage(hEditMsg, EM_SETSEL, 0, -1);
+			return TRUE;
+
+		// 첫번째 채팅방 유저출력 버튼
+		case IDC_SHOWFIRST:
+			sendNickName = false;
+
+			showNickName = true;
+			g_chatmsg.type = REQUESTNICKNAME;
+
+			send(g_sock, (char *)&g_chatmsg, BUFSIZE, 0);
+			DisplayText(g_isChating, "[첫번째 채팅방 유저를 출력합니다]\r\n");
+			DisplayText(g_isChating, "%s(나)\r\n", nickName[0]);
+			SetEvent(g_hReadEvent);
+
 			return TRUE;
 
 		case IDCANCEL:
@@ -365,9 +385,22 @@ DWORD WINAPI ReadThread(LPVOID arg)
 			chat_msg = (CHAT_MSG *)&comm_msg;
 			DisplayText(chat_msg->chatMode, "[%s] : %s \r\n", chat_msg->nickName, chat_msg->buf);
 		}
-		if (comm_msg.type == NICKNAMECHANGE) {
-			chat_msg = (CHAT_MSG *)&comm_msg;
-			firstChatingUser[firstUserCount] = chat_msg->nickName;
+		// 여긴 요청당한 클라이언트들이 받는곳
+		else if (comm_msg.type == REQUESTNICKNAME) {
+			if (!showNickName) {
+				g_chatmsg.type = RECEIVENICKNAME;
+				sendNickName = true;
+				strcpy(g_chatmsg.nickName, nickName[0]);
+				send(g_sock, (char *)&g_chatmsg, BUFSIZE, 0);
+			}
+		}
+		// 요청당한 클라이언트들이 다시 보내는곳
+		else if (comm_msg.type == RECEIVENICKNAME) {
+			if (!sendNickName) {
+				showNickName = false;
+				chat_msg = (CHAT_MSG *)&comm_msg;
+				DisplayText(chat_msg->chatMode, "%s\r\n", chat_msg->nickName);
+			}
 		}
 	}
 

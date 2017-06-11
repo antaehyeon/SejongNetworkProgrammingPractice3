@@ -145,33 +145,22 @@ int main(int argc, char *argv[])
 				// 데이터 받기
 				retval = recv(ptr->sock, ptr->buf + ptr->recvbytes,
 					BUFSIZE - ptr->recvbytes, 0);
-				printf("%s\r\n", ptr->buf);
 				if(retval == 0 || retval == SOCKET_ERROR){
 					RemoveSocketInfo(i);
 					continue;
 				}
 
-				printf("타입 번호는 %d 입니다\n\n", ptr->sock);
+				// 현재 접속한 모든 클라이언트에게 데이터를 보냄!
+				for(j=0; j<nTotalSockets; j++){
+					SOCKETINFO *ptr2 = SocketInfoArray[j];
 
-				// 받은 바이트 수 누적
-				ptr->recvbytes += retval;
-
-				if(ptr->recvbytes == BUFSIZE){
-					// 받은 바이트 수 리셋
-					ptr->recvbytes = 0;
-
-					// 현재 접속한 모든 클라이언트에게 데이터를 보냄!
-					for(j=0; j<nTotalSockets; j++){
-						SOCKETINFO *ptr2 = SocketInfoArray[j];
-
-						retval = send(ptr2->sock, ptr->buf, BUFSIZE, 0);
-						//retval = send(ptr2->sock, ptr->nickName, BUFSIZE, 0);
-						if(retval == SOCKET_ERROR){
-							err_display("send()");
-							RemoveSocketInfo(j);
-							--j; // 루프 인덱스 보정
-							continue;
-						}
+					retval = send(ptr2->sock, ptr->buf, BUFSIZE, 0);
+					//retval = send(ptr2->sock, ptr->nickName, BUFSIZE, 0);
+					if(retval == SOCKET_ERROR){
+						err_display("send()");
+						RemoveSocketInfo(j);
+						--j; // 루프 인덱스 보정
+						continue;
 					}
 				}
 			}
