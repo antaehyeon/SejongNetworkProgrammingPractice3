@@ -76,6 +76,9 @@ static bool			 isDuplicationNickName = false;
 static bool			 isInitialNickNameFirstRoom = false;
 static bool			 isInitialNickNameSecondRoom = false;
 
+static bool			 isSetFirstNickName = false;
+static bool			 isSetSecondNickName = false;
+
 
 // 대화상자 프로시저
 BOOL CALLBACK DlgProc(HWND, UINT, WPARAM, LPARAM);
@@ -272,9 +275,9 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			// 읽기 완료를 기다림
 			WaitForSingleObject(g_hReadEvent, INFINITE);
 			g_chatmsg.type = CHATTING;
-			// 첫번째 채팅방일때
 			switch (g_isChatting)
 			{
+			// 첫번째 채팅방일 경우
 			case FIRST_CHAT:
 				GetDlgItemText(hDlg, IDC_NICKNAME, g_chatmsg.nickName, MSGSIZE);
 				if (!isInitialNickNameFirstRoom) {
@@ -286,6 +289,7 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 					EnableWindow(hEditNickName, FALSE);
 				}
 				break;
+			// 두번째 채팅방일 경우
 			case SECOND_CHAT:
 				GetDlgItemText(hDlg, IDC_NICKNAME2, g_chatmsg.nickName, MSGSIZE);
 				if (!isInitialNickNameSecondRoom) {
@@ -315,7 +319,12 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 			send(g_sock, (char *)&g_chatmsg, BUFSIZE, 0);
 			DisplayText(g_isChatting, "[첫번째 채팅방 유저를 출력합니다]\r\n");
-			DisplayText(g_isChatting, "%s(나)\r\n", firstNickName);
+			if (!strcmp(firstNickName, "")) {
+				DisplayText(g_isChatting, "닉네임 미설정(나)\r\n");
+			}
+			else {
+				DisplayText(g_isChatting, "%s(나)\r\n", firstNickName);
+			}
 			SetEvent(g_hReadEvent);
 
 			return TRUE;
@@ -329,7 +338,7 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 			send(g_sock, (char *)&g_chatmsg, BUFSIZE, 0);
 			DisplayText(g_isChatting, "[두번째 채팅방 유저를 출력합니다]\r\n");
-			if (secondNickName == NULL) {
+			if (!strcmp(secondNickName, "")) {
 				DisplayText(g_isChatting, "닉네임 미설정(나)\r\n");
 			}
 			else {
@@ -345,6 +354,7 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			switch (g_isChatting) {
 			case FIRST_CHAT:
 				if (isNickNameChange || !isInitialNickNameFirstRoom) {
+					isNickNameChange = true;
 					GetDlgItemText(hDlg, IDC_NICKNAME, g_chatmsg.nickName, MSGSIZE);
 					strcpy(tempNickName, g_chatmsg.nickName);
 					g_chatmsg.type = NICKNAMECHANGE;
@@ -366,16 +376,18 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 						strcpy(firstNickName, tempNickName);
 						isInitialNickNameFirstRoom = true;
 						EnableWindow(g_hButtonSendMsg, TRUE);
+						isSetFirstNickName = true;
 					}
 					break;
 				}
-				EnableWindow(hEditNickName, TRUE);
 				isNickNameChange = true;
+				EnableWindow(hEditNickName, TRUE);
 				break;
 
 			case SECOND_CHAT:
 				EnableWindow(g_hButtonSendMsg, FALSE);
 				if (isNickNameChange || !isInitialNickNameSecondRoom) {
+					isNickNameChange = true;
 					GetDlgItemText(hDlg, IDC_NICKNAME2, g_chatmsg.nickName, MSGSIZE);
 					strcpy(tempNickName, g_chatmsg.nickName);
 					g_chatmsg.type = NICKNAMECHANGE;
@@ -397,12 +409,12 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 						strcpy(secondNickName, tempNickName);
 						isInitialNickNameSecondRoom = true;
 						EnableWindow(g_hButtonSendMsg, TRUE);
+						isSetSecondNickName = true;
 					}
 					break;
 				}
-				EnableWindow(hSecondEditNickName, TRUE);
 				isNickNameChange = true;
-
+				EnableWindow(hSecondEditNickName, TRUE);
 				break;
 			}
 			return TRUE;
@@ -571,17 +583,25 @@ DWORD WINAPI WriteThread(LPVOID arg)
 			// '메시지 전송' 버튼 활성화
 			EnableWindow(g_hButtonSendMsg, TRUE);
 			MessageBox(NULL, "메세지가 아무것도 입력되지 않았습니다", "알림", MB_ICONINFORMATION);
-			// 읽기 완료 알리기
 			SetEvent(g_hReadEvent);
 			continue;
 		}
 
-		//// 닉네임 길이가 0이면 보내지 않음
-		//if (strlen(g_chatmsg.nickname) == 0) {
-		//	MessageBox(NULL, "닉네임을 입력해주시기 바랍니다", "알림", MB_ICONINFORMATION);
-		//	SetEvent(g_hReadEvent);
-		//	continue;
-		//}
+		switch (g_isChatting)
+		{
+		case FIRST_CHAT:
+			if (!isSetFirstNickName) {
+				SetEvent(g_hReadEvent);
+				continue;
+			}
+			break;
+		case SECOND_CHAT:
+			if (!isSetSecondNickName) {
+				SetEvent(g_hReadEvent);
+				continue;
+			}
+			break;
+		}
 
 		// 데이터 보내기
 		retval = send(g_sock, (char *)&g_chatmsg, BUFSIZE, 0);
