@@ -24,6 +24,10 @@
 #define REQUESTNICKNAME 3000
 #define REQUESTSECONDNICKNAME 3100
 #define RECEIVENICKNAME 3001
+#define WHISPERMODE 4000
+#define IDCHECKFORWHISPER 4001
+#define SAMENICKNAMEFORWHISPER 4002
+#define RECEIVEFORWHISPER 4003
 
 #define WM_DRAWIT   (WM_USER+1)            // 사용자 정의 윈도우 메시지
 
@@ -59,7 +63,7 @@ static BOOL          g_isIPv6; // IPv4 or IPv6 주소?
 static HANDLE        g_hClientThread; // 스레드 핸들
 static volatile BOOL g_bStart; // 통신 시작 여부
 static SOCKET        g_sock; // 클라이언트 소켓
-static HANDLE        g_hReadEvent, g_hWriteEvent, g_nickNameEvent; // 이벤트 핸들
+static HANDLE        g_hReadEvent, g_hWriteEvent; // 이벤트 핸들
 static CHAT_MSG      g_chatmsg; // 채팅 메시지 저장
 
 static int			 g_isChatting; // 채팅방 모드
@@ -67,6 +71,8 @@ static int			 g_isChatting; // 채팅방 모드
 static char			 firstNickName[256] = { '\0', };
 static char			 secondNickName[256] = { '\0', };
 static char			 tempNickName[256] = { '\0', };
+static char			 tempWhisperNickName[256] = { '\0', };
+static char			 tempWhisperChatMsg[256] = { '\0', };
 static bool			 showNickName = false;
 static bool			 sendNickName = false;
 
@@ -78,6 +84,14 @@ static bool			 isInitialNickNameSecondRoom = false;
 
 static bool			 isSetFirstNickName = false;
 static bool			 isSetSecondNickName = false;
+
+static bool			 isInitialWhisperFirst = false;
+static bool			 isInitialWhisperSecond = false;
+static bool			 isFirstWhisperState = false;
+static bool			 isFirstWhisperButtonChk = false;
+static bool			 isSecondWhisperState = false;
+static bool			 isSecondWhisperButtonChk = false;
+static bool			 isDuplicationForWhisper = false;
 
 
 // 대화상자 프로시저
@@ -107,8 +121,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 	if(g_hReadEvent == NULL) return 1;
 	g_hWriteEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
 	if(g_hWriteEvent == NULL) return 1;
-	g_nickNameEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
-	if (g_nickNameEvent == NULL) return 1;
 
 	// 변수 초기화(일부)
 	g_chatmsg.type = CHATTING;
@@ -121,7 +133,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 	// 이벤트 제거
 	CloseHandle(g_hReadEvent);
 	CloseHandle(g_hWriteEvent);
-	CloseHandle(g_nickNameEvent);
 
 	// 윈속 종료
 	WSACleanup();
@@ -145,9 +156,15 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	// 닉네임 변경하는 버튼
 	static HWND btnNickNameChange;
 
+	// 닉네임 출력하는 버튼
 	static HWND btnShowFirstRoom;
 	static HWND btnShowSecondRoom;
 
+	// 귓속말 객체
+	static HWND hEditWhisper;
+	static HWND btnWhisper;
+	static HWND hEditSecondWhisper;
+	static HWND btnSecondWhisper;
 
 	switch(uMsg){
 	case WM_INITDIALOG:
@@ -170,8 +187,14 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		// 닉네임 변경하는 버튼
 		btnNickNameChange = GetDlgItem(hDlg, IDC_NICKNAMECHANGEBTN);
 
+		// 첫번째, 두번째 닉네임 출력하는 버튼
 		btnShowFirstRoom = GetDlgItem(hDlg, IDC_SHOWFIRST);
 		btnShowSecondRoom = GetDlgItem(hDlg, IDC_SHOWSECOND);
+		
+		hEditWhisper = GetDlgItem(hDlg, IDC_WHISPERTEXTBOX);
+		btnWhisper = GetDlgItem(hDlg, IDC_WHISPERBUTTON);
+		hEditSecondWhisper = GetDlgItem(hDlg, IDC_SECONDWHISPERTEXTBOX);
+		btnSecondWhisper = GetDlgItem(hDlg, IDC_BTNSECONDWHISPER);
 
 		// 컨트롤 초기화
 		SendMessage(hEditMsg, EM_SETLIMITTEXT, MSGSIZE, 0);
@@ -183,7 +206,16 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		ShowWindow(hSecondEditNickName, FALSE);
 		EnableWindow(btnShowFirstRoom, FALSE);
 		EnableWindow(btnShowSecondRoom, FALSE);
+		EnableWindow(hEditWhisper, FALSE);
+		EnableWindow(btnWhisper, FALSE);
 		EnableWindow(hEditNickName, FALSE);
+		// 귓속말 부분 컨트롤 관련
+		EnableWindow(hEditWhisper, FALSE);
+		EnableWindow(btnWhisper, FALSE);
+		EnableWindow(hEditSecondWhisper, FALSE);
+		EnableWindow(btnSecondWhisper, FALSE);
+		ShowWindow(hEditSecondWhisper, FALSE);
+		ShowWindow(btnSecondWhisper, FALSE);
 		SetDlgItemText(hDlg, IDC_IPADDRESS, SERVERIPV4);
 		SetDlgItemInt(hDlg, IDC_PORT, SERVERPORT, FALSE);
 
@@ -241,6 +273,12 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 				EnableWindow(btnShowFirstRoom, TRUE);
 				EnableWindow(btnShowSecondRoom, TRUE);
 				EnableWindow(hEditNickName, TRUE);
+				// 닉네임 관련된 부분
+				EnableWindow(hEditWhisper, TRUE);
+				EnableWindow(btnWhisper, TRUE);
+				EnableWindow(hEditSecondWhisper, TRUE);
+				EnableWindow(btnSecondWhisper, TRUE);
+
 				SetFocus(hEditMsg);
 				g_isChatting = FIRST_CHAT;
 				EnableWindow(btnNickNameChange, TRUE);
@@ -255,6 +293,12 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			EnableWindow(btnSecondChatConnect, TRUE);
 			ShowWindow(hEditNickName, TRUE);
 			ShowWindow(hSecondEditNickName, FALSE);
+			// 귓속말 관련 컨트롤
+			ShowWindow(hEditWhisper, TRUE);
+			ShowWindow(btnWhisper, TRUE);
+			ShowWindow(hEditSecondWhisper, FALSE);
+			ShowWindow(btnSecondWhisper, FALSE);
+
 			g_chatmsg.chatMode = FIRST_CHAT;
 			g_isChatting = FIRST_CHAT;
 			return TRUE;
@@ -267,6 +311,12 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			EnableWindow(btnSecondChatConnect, FALSE);
 			ShowWindow(hEditNickName, FALSE);
 			ShowWindow(hSecondEditNickName, TRUE);
+			// 귓속말 관련 컨트롤
+			ShowWindow(hEditWhisper, FALSE);
+			ShowWindow(btnWhisper, FALSE);
+			ShowWindow(hEditSecondWhisper, TRUE);
+			ShowWindow(btnSecondWhisper, TRUE);
+
 			g_chatmsg.chatMode = SECOND_CHAT;
 			g_isChatting = SECOND_CHAT;
 			return TRUE;
@@ -280,6 +330,9 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			// 첫번째 채팅방일 경우
 			case FIRST_CHAT:
 				GetDlgItemText(hDlg, IDC_NICKNAME, g_chatmsg.nickName, MSGSIZE);
+				GetDlgItemText(hDlg, IDC_MSG, g_chatmsg.buf, MSGSIZE);
+				GetDlgItemText(hDlg, IDC_WHISPERTEXTBOX, tempWhisperNickName, MSGSIZE);
+				strcpy(tempWhisperChatMsg, g_chatmsg.buf);
 				if (!isInitialNickNameFirstRoom) {
 					MessageBox(hDlg, "닉네임을 설정해주세요 :)", "실패!", MB_ICONERROR);
 					break;
@@ -287,6 +340,18 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 				else {
 					strcpy(firstNickName, g_chatmsg.nickName);
 					EnableWindow(hEditNickName, FALSE);
+				}
+				if (isFirstWhisperState) {
+					char whisperMessage[124] = { '\0', };
+
+					strcat(whisperMessage, "[");
+					strcat(whisperMessage, firstNickName);
+					strcat(whisperMessage, "님의 귓속말] : ");
+					strcat(whisperMessage, g_chatmsg.buf);
+
+					g_chatmsg.type = RECEIVEFORWHISPER;
+					strcpy(g_chatmsg.nickName, tempWhisperNickName);
+					strcpy(g_chatmsg.buf, whisperMessage);					
 				}
 				break;
 			// 두번째 채팅방일 경우
@@ -302,8 +367,6 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 				}
 				break;
 			}
-
-			GetDlgItemText(hDlg, IDC_MSG, g_chatmsg.buf, MSGSIZE);
 			// 쓰기 완료를 알림
 			SetEvent(g_hWriteEvent);
 			// 입력된 텍스트 전체를 선택 표시
@@ -377,11 +440,18 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 						isInitialNickNameFirstRoom = true;
 						EnableWindow(g_hButtonSendMsg, TRUE);
 						isSetFirstNickName = true;
+						EnableWindow(btnWhisper, TRUE);
+						// 귓속말 부분이 동작시, 비활성화
+						if (!isFirstWhisperState) {
+							EnableWindow(hEditWhisper, TRUE);
+						}
 					}
 					break;
 				}
 				isNickNameChange = true;
 				EnableWindow(hEditNickName, TRUE);
+				EnableWindow(hEditWhisper, FALSE);
+				EnableWindow(btnWhisper, FALSE);
 				break;
 
 			case SECOND_CHAT:
@@ -410,13 +480,53 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 						isInitialNickNameSecondRoom = true;
 						EnableWindow(g_hButtonSendMsg, TRUE);
 						isSetSecondNickName = true;
+						EnableWindow(btnSecondWhisper, TRUE);
+						// 귓속말 부분이 동작하지 않을 시, 활성화
+						if (!isSecondWhisperState) {
+							EnableWindow(hEditSecondWhisper, TRUE);
+						}
 					}
 					break;
 				}
 				isNickNameChange = true;
 				EnableWindow(hSecondEditNickName, TRUE);
+				EnableWindow(hEditSecondWhisper, FALSE);
+				EnableWindow(btnSecondWhisper, FALSE);
 				break;
 			}
+			return TRUE;
+
+		// 귓속말 버튼
+		case IDC_WHISPERBUTTON:
+			if (isFirstWhisperButtonChk || !isInitialWhisperFirst) {
+				g_chatmsg.type = IDCHECKFORWHISPER;
+				GetDlgItemText(hDlg, IDC_WHISPERTEXTBOX, g_chatmsg.nickName, MSGSIZE);
+				send(g_sock, (char *)&g_chatmsg, BUFSIZE, 0);
+
+				Sleep(100);
+
+				if (!isDuplicationForWhisper) {
+					MessageBox(hDlg, "닉네임이 존재하지 않습니다!", "Error", MB_ICONERROR);
+					return TRUE;
+				}
+				else {
+					MessageBox(hDlg, "귓속말 상태로 전환됩니다 :)", "성공", MB_OK);
+					isInitialWhisperFirst = true;
+					isFirstWhisperButtonChk = false;
+					isDuplicationForWhisper = false;
+					isFirstWhisperState = true;
+					EnableWindow(hEditWhisper, FALSE);
+					return TRUE;
+				}
+			}
+			isFirstWhisperState = false;
+			isDuplicationForWhisper = false;
+			isFirstWhisperButtonChk = true;
+			EnableWindow(hEditWhisper, TRUE);
+			return TRUE;
+
+		case IDC_BTNSECONDWHISPER:
+			isSecondWhisperState = true;
 			return TRUE;
 
 		case IDCANCEL:
@@ -518,19 +628,42 @@ DWORD WINAPI ReadThread(LPVOID arg)
 			break;
 		}
 
+
 		if(comm_msg.type == CHATTING){
 			chat_msg = (CHAT_MSG *)&comm_msg;
-			DisplayText(chat_msg->chatMode, "[%s] : %s \r\n", chat_msg->nickName, chat_msg->buf);
+			DisplayText(chat_msg->chatMode, "[%s] : %s \r\n", chat_msg->nickName, chat_msg->buf);			
 		}
-		else if (comm_msg.type == NICKNAMECHANGE) {
+		else if (comm_msg.type == NICKNAMECHANGE || comm_msg.type == IDCHECKFORWHISPER) {
 			chat_msg = (CHAT_MSG *)&comm_msg;
 			if (!strcmp(chat_msg->nickName, firstNickName) || !strcmp(chat_msg->nickName, secondNickName)) {
-				g_chatmsg.type = SAMENICKNAME;
+				if (comm_msg.type == NICKNAMECHANGE) {
+					g_chatmsg.type = SAMENICKNAME;
+				}
+				else if (comm_msg.type == IDCHECKFORWHISPER) {
+					g_chatmsg.type = SAMENICKNAMEFORWHISPER;
+				}
 				send(g_sock, (char *)&g_chatmsg, BUFSIZE, 0);
 			}
 		}
 		else if (comm_msg.type == SAMENICKNAME && isNickNameChange) {
 			isDuplicationNickName = true;
+		}
+		else if (comm_msg.type == SAMENICKNAMEFORWHISPER) {
+			isDuplicationForWhisper = true;
+		}
+		else if (comm_msg.type == RECEIVEFORWHISPER) {
+			chat_msg = (CHAT_MSG *)&comm_msg;
+			if (isFirstWhisperState) {
+				DisplayText(g_isChatting, "[%s 님에게 보내는 귓속말] : %s\r\n", tempWhisperNickName, tempWhisperChatMsg);
+			}
+			else {
+				if (!strcmp(chat_msg->nickName, firstNickName)) {
+					DisplayText(FIRST_CHAT, "%s\r\n", chat_msg->buf);
+				}
+				else {
+					DisplayText(SECOND_CHAT, "%s\r\n", chat_msg->buf);
+				}
+			}
 		}
 		// 여긴 요청당한 클라이언트들이 받는곳
 		else if (comm_msg.type == REQUESTNICKNAME) {
