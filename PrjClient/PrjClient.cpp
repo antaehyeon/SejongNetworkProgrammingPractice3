@@ -440,6 +440,12 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 				if (isNickNameChange || !isInitialNickNameFirstRoom) {
 					isNickNameChange = true;
 					GetDlgItemText(hDlg, IDC_NICKNAME, g_chatmsg.nickName, MSGSIZE);
+
+					if (strlen(g_chatmsg.nickName) == 0) {
+						MessageBox(hDlg, "닉네임은 공백이 될 수 없습니다", "경고", MB_ICONERROR);
+						return true;
+					}
+
 					strcpy(tempNickName, g_chatmsg.nickName);
 					g_chatmsg.type = NICKNAMECHANGE;
 					send(g_sock, (char *)&g_chatmsg, BUFSIZE, 0);
@@ -488,6 +494,12 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 				if (isNickNameChange || !isInitialNickNameSecondRoom) {
 					isNickNameChange = true;
 					GetDlgItemText(hDlg, IDC_NICKNAME2, g_chatmsg.nickName, MSGSIZE);
+
+					if (strlen(g_chatmsg.nickName) == 0) {
+						MessageBox(hDlg, "닉네임은 공백이 될 수 없습니다", "경고", MB_ICONERROR);
+						return true;
+					}
+
 					strcpy(tempNickName, g_chatmsg.nickName);
 					g_chatmsg.type = NICKNAMECHANGE;
 					send(g_sock, (char *)&g_chatmsg, BUFSIZE, 0);
